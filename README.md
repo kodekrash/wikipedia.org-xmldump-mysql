@@ -72,7 +72,7 @@ Howto
 * Download the script.
 * Edit the configuration variables at the beginning of the script depending on which file you download, and where you want the log file to be placed:
 
-		$db = [
+		$dbc = [
 			'host' => 'localhost',
 			'port' => null,
 			'user' => null,
