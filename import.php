@@ -2,24 +2,34 @@
 <?php
 
 /**
- * @copyright 2013 James Linden <kodekrash@gmail.com>
+ * @copyright 2013,2016 James Linden <kodekrash@gmail.com>
  * @author James Linden <kodekrash@gmail.com>
  * @link http://jameslinden.com/dataset/wikipedia.org/xml-dump-import-mysql
  * @link https://github.com/kodekrash/wikipedia.org-xmldump-mysql
  * @license BSD (2 clause) <http://www.opensource.org/licenses/BSD-2-Clause>
  */
 
-$dbc = [
+$cfg = [
 	'host' => 'localhost',
 	'port' => null,
 	'user' => null,
 	'pass' => null,
-	'name' => null
+	'name' => null,
+	'file' => null
 ];
-$file = 'enwiki-20130708-pages-articles.xml.bz2';
+
 $logpath = './';
 
 /*************************************************************************/
+
+$opts = getopt( null, [ 'host:', 'port:', 'user:', 'pass:', 'name:', 'file:' ] );
+if( is_array( $opts ) && count( $opts ) > 0 ) {
+	foreach( $opts as $k => $v ) {
+		if( array_key_exists( $k, $cfg ) && !empty( $v ) ) {
+			$cfg[ $k ] = $v;
+		}
+	}
+}
 
 date_default_timezone_set( 'UTC' );
 
@@ -27,7 +37,14 @@ function abort( $s ) {
 	die( 'Aborting. ' . trim( $s ) . PHP_EOL );
 }
 
-if( !is_file( $file ) || !is_readable( $file ) ) {
+$reqs = [ 'bzip2' => 'bzopen', 'mysqli' => 'mysqli_connect', 'simplexml' => 'simplexml_load_string' ];
+foreach( $reqs as $k => $v ) {
+	if( !function_exists( $v ) ) {
+		abort( $k . ' features not available.' );
+	}
+}
+
+if( !is_file( $cfg['file'] ) || !is_readable( $cfg['file'] ) ) {
 	abort( 'Data file is missing or not readable.' );
 }
 
@@ -35,12 +52,12 @@ if( !is_dir( $logpath ) || !is_writable( $logpath ) ) {
 	abort( 'Log path is missing or not writable.' );
 }
 
-$in = bzopen( $file, 'r' );
+$in = bzopen( $cfg['file'], 'r' );
 if( !$in ) {
 	abort( 'Unable to open input file.' );
 }
 
-$out = fopen( rtrim( $logpath, '/' ) . '/wikipedia.org_xmldump-' . date( 'YmdH' ) . '.log', 'w' );
+$out = fopen( rtrim( $logpath, '/' ) . '/import-' . date( 'YmdH' ) . '.log', 'w' );
 if( !$out ) {
 	abort( 'Unable to open log file.' );
 }
@@ -50,12 +67,12 @@ function q( $str ) {
 	return "'" . $db->real_escape_string( $str ) . "'";
 }
 
-$sql_ns = 'INSERT INTO t_namespace (c_id,c_name) VALUES (%s,%s)';
-$sql_page = 'INSERT INTO t_page (c_id,c_namespace,c_redirect,c_title,c_search) VALUES (%d,%s,%s,%s,%s)';
-$sql_contrib = 'INSERT INTO t_contrib (c_id,c_name) VALUES (%d,%s)';
-$sql_rev = "INSERT INTO t_revision (c_id,c_page,c_contrib,c_parent,c_datetime,c_length,c_minor,c_comment,c_sha1,c_body) VALUES (%d,%d,%d,%d,'%s',%d,%s,%s,'%s',%s)";
+$sql_ns = 'INSERT INTO namespace (id,name) VALUES (%s,%s)';
+$sql_page = 'INSERT INTO page (id,namespace,redirect,title,search) VALUES (%d,%s,%s,%s,%s)';
+$sql_contrib = 'INSERT INTO contrib (id,name) VALUES (%d,%s)';
+$sql_rev = "INSERT INTO revision (id,page,contrib,parent,datetime,length,minor,comment,sha1,body) VALUES (%d,%d,%d,%d,'%s',%d,%s,%s,'%s',%s)";
 
-$db = mysqli_connect( $dbc['host'], $dbc['user'], $dbc['pass'], $dbc['name'], $dbc['port'] );
+$db = new mysqli( $cfg['host'], $cfg['user'], $cfg['pass'], $cfg['name'], $cfg['port'] );
 if( $db->connect_error ) {
 	abort( 'Unable to connect to database.' );
 }
@@ -79,17 +96,14 @@ while( !feof( $in ) ) {
 		}
 		if( $line == '</namespaces>' ) {
 			$start = false;
-			$chunk = str_replace( [ 'letter">', '</namespace>' ], [ 'letter" name="', '" />' ], $chunk );
-			$x = simplexml_load_string( $chunk );
+			$chunk = str_replace( [ '">', '</namespace>' ], [ '" name="', '" />' ], $chunk );
+			$x = @simplexml_load_string( $chunk );
 			$chunk = null;
 			if( $x ) {
 				foreach( $x->namespace as $y ) {
 					$y = (array)$y;
 					$ni = (int)$y['@attributes']['key'];
-					$nn = null;
-					if( array_key_exists( 'name', $y['@attributes'] ) ) {
-						$nn = (string)$y['@attributes']['name'];
-					}
+					$nn = array_key_exists( 'name', $y['@attributes'] ) ? (string)$y['@attributes']['name'] : null;
 					$db->query( sprintf( $sql_ns, q( $ni ), q( $nn ) ) );
 				}
 			} else {
@@ -97,7 +111,7 @@ while( !feof( $in ) ) {
 			}
 		} else if( $line == '</page>' ) {
 			$start = false;
-			$x = simplexml_load_string( $chunk );
+			$x = @simplexml_load_string( $chunk );
 			$chunk = $line = null;
 			if( $x ) {
 				$find_p ++;
