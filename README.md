@@ -1,6 +1,8 @@
 wikipedia.org-xmldump-mysql
 ===========================
 
+This code works, but will not be maintained after Feb 2016. Please refer to https://github.com/kodekrash/wikipedia.org-xmldump-importer for future updates.
+
 Overview
 --------
 
